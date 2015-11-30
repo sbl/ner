@@ -1,0 +1,13 @@
+language: go
+
+go:
+  - 1.5
+
+before_install:
+  - bash install-mitie.sh
+
+env:
+  - LD_LIBRARY_PATH=/tmp/mitie/lib LIBRARY_PATH=/tmp/mitie/lib C_INCLUDE_PATH=/tmp/mitie/include
+
+script:
+  - go test

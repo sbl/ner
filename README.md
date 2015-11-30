@@ -8,7 +8,10 @@ Extraction)](https://github.com/mit-nlp/MITIE) library.
 ### Installation
 
 - Install the MITIE library and header files. This does vary by platform. On a
-  mac this would be (`brew install mitie`)
+  mac the easiest way would be `brew install mitie`. You'd have build from
+  source on a linux system.
+- The go bindings will fail if the MITIE header files and dynamic library are
+  not found.
 - `go get github.com/sbl/ner`
 
 ### Usage
