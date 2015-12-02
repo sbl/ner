@@ -1,6 +1,7 @@
 # NER
 
 [![GoDoc](https://godoc.org/github.com/sbl/ner?status.svg)](https://godoc.org/github.com/sbl/ner)
+[![Build Status](https://travis-ci.org/sbl/ner.svg?branch=travis)](https://travis-ci.org/sbl/ner)
 
 Named Entity Recognition for golang via the [MITIE (MIT Information
 Extraction)](https://github.com/mit-nlp/MITIE) library.
