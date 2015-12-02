@@ -31,10 +31,14 @@ import (
 )
 
 var (
+	// ErrCantOpen is returned by NewExtractor when a language model file can't
+	// be loaded.
 	ErrCantOpen = errors.New("Unable to open model file")
-	ErrMemory   = errors.New("Could not allocate memory")
+	// ErrMemory occurs when underlying C structs cannot be allocated.
+	ErrMemory = errors.New("Could not allocate memory")
 )
 
+// Tokenize returns a slice that contains a tokenized copy of the input text.
 func Tokenize(text string) []string {
 	cs := C.CString(text)
 	defer C.free(unsafe.Pointer(cs))
@@ -51,22 +55,27 @@ func Tokenize(text string) []string {
 	return tokens
 }
 
+// Range specifies the position of an Entity within a token slice.
 type Range struct {
 	Start int
 	End   int
 }
 
+// Entity is a detected entity.
 type Entity struct {
-	Score float64
-	Tag   int
-	Name  string
-	Range Range
+	Score     float64
+	Tag       int
+	TagString string
+	Name      string
+	Range     Range
 }
 
+// Extractor detects entities based on a language model file.
 type Extractor struct {
 	ner *C.mitie_named_entity_extractor
 }
 
+// NewExtractor returns an Extractor given the path to a language model.
 func NewExtractor(path string) (*Extractor, error) {
 	model := C.CString(path)
 	defer C.free(unsafe.Pointer(model))
@@ -80,23 +89,28 @@ func NewExtractor(path string) (*Extractor, error) {
 	}, nil
 }
 
-func (ner *Extractor) Free() {
-	C.mitie_free(unsafe.Pointer(ner.ner))
+// Free frees the underlying used C memory.
+func (ext *Extractor) Free() {
+	C.mitie_free(unsafe.Pointer(ext.ner))
 }
 
+// Tags returns a slice of Tags that are part of this language model.
+// E.g. PERSON or LOCATION, etc…
 func (ext *Extractor) Tags() []string {
 	num := int(C.mitie_get_num_possible_ner_tags(ext.ner))
 	tags := make([]string, num, num)
 	for i := 0; i < num; i++ {
-		tags[i] = ext.TagString(i)
+		tags[i] = ext.tagString(i)
 	}
 	return tags
 }
 
-func (ext *Extractor) TagString(index int) string {
+func (ext *Extractor) tagString(index int) string {
 	return C.GoString(C.mitie_get_named_entity_tagstr(ext.ner, C.ulong(index)))
 }
 
+// Extract runs the extractor and returns a slice of Entities found in the
+// given tokens.
 func (ext *Extractor) Extract(tokens []string) ([]Entity, error) {
 	ctokens := C.ner_arr_make(C.int(len(tokens)) + 1) // NULL termination
 	defer C.ner_arr_free(ctokens, C.int(len(tokens))+1)
