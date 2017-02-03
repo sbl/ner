@@ -55,6 +55,29 @@ func Tokenize(text string) []string {
 	return tokens
 }
 
+// TokenizeWithOffests is identical to calling Tokenize(text)
+// but it also outputs the positions of each token within the input text data.
+func TokenizeWithOffsets(text string) ([]string, []uint32) {
+	cs := C.CString(text)
+	defer C.free(unsafe.Pointer(cs))
+	var cOffsets *C.ulong
+	defer C.free(unsafe.Pointer(cOffsets))
+	ctokens := C.mitie_tokenize_with_offsets(cs, &cOffsets)
+	defer C.mitie_free(unsafe.Pointer(ctokens))
+	i := 0
+	// a hack since mitie arrays are NULL terminated.
+	p := (*[1 << 30]*C.char)(unsafe.Pointer(ctokens))
+	q := (*[1 << 30]C.ulong)(unsafe.Pointer(cOffsets))
+	tokens := make([]string, 0, 20)
+	offsets := make([]uint32, 0, 20)
+	for p[i] != nil {
+		tokens = append(tokens, C.GoString(p[i]))
+		offsets = append(offsets, uint32(q[i]))
+		i++
+	}
+	return tokens, offsets
+}
+
 // Range specifies the position of an Entity within a token slice.
 type Range struct {
 	Start int
