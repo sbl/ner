@@ -185,11 +185,11 @@ func (ext *Extractor) NewExtraction(tokens []string) (*Extraction, error) {
 		tagID := int(C.mitie_ner_get_detection_tag(extn.dets, C.ulong(i)))
 
 		extn.Entities[i] = Entity{
-			Tag:   tagID,
+			Tag:       tagID,
 			TagString: tagNames[tagID],
-			Score: float64(C.mitie_ner_get_detection_score(extn.dets, C.ulong(i))),
-			Name:  strings.Join(extn.Tokens[pos:pos+len], " "),
-			Range: Range{pos, pos + len},
+			Score:     float64(C.mitie_ner_get_detection_score(extn.dets, C.ulong(i))),
+			Name:      strings.Join(extn.Tokens[pos:pos+len], " "),
+			Range:     Range{pos, pos + len},
 		}
 	}
 
