@@ -55,6 +55,29 @@ func Tokenize(text string) []string {
 	return tokens
 }
 
+// TokenizeWithOffests is identical to calling Tokenize(text)
+// but it also outputs the positions of each token within the input text data.
+func TokenizeWithOffsets(text string) ([]string, []uint32) {
+	cs := C.CString(text)
+	defer C.free(unsafe.Pointer(cs))
+	var cOffsets *C.ulong
+	defer C.free(unsafe.Pointer(cOffsets))
+	ctokens := C.mitie_tokenize_with_offsets(cs, &cOffsets)
+	defer C.mitie_free(unsafe.Pointer(ctokens))
+	i := 0
+	// a hack since mitie arrays are NULL terminated.
+	p := (*[1 << 30]*C.char)(unsafe.Pointer(ctokens))
+	q := (*[1 << 30]C.ulong)(unsafe.Pointer(cOffsets))
+	tokens := make([]string, 0, 20)
+	offsets := make([]uint32, 0, 20)
+	for p[i] != nil {
+		tokens = append(tokens, C.GoString(p[i]))
+		offsets = append(offsets, uint32(q[i]))
+		i++
+	}
+	return tokens, offsets
+}
+
 // Range specifies the position of an Entity within a token slice.
 type Range struct {
 	Start int
@@ -72,7 +95,8 @@ type Entity struct {
 
 // Extractor detects entities based on a language model file.
 type Extractor struct {
-	ner *C.mitie_named_entity_extractor
+	ner  *C.mitie_named_entity_extractor
+	tags []string // E.g. PERSON or LOCATION, etc…
 }
 
 // NewExtractor returns an Extractor given the path to a language model.
@@ -84,8 +108,15 @@ func NewExtractor(path string) (*Extractor, error) {
 		return nil, ErrCantOpen
 	}
 
+	num := int(C.mitie_get_num_possible_ner_tags(ner))
+	tags := make([]string, num, num)
+	for i := 0; i < num; i++ {
+		tags[i] = C.GoString(C.mitie_get_named_entity_tagstr(ner, C.ulong(i)))
+	}
+
 	return &Extractor{
-		ner: ner,
+		ner:  ner,
+		tags: tags,
 	}, nil
 }
 
@@ -97,12 +128,7 @@ func (ext *Extractor) Free() {
 // Tags returns a slice of Tags that are part of this language model.
 // E.g. PERSON or LOCATION, etc…
 func (ext *Extractor) Tags() []string {
-	num := int(C.mitie_get_num_possible_ner_tags(ext.ner))
-	tags := make([]string, num, num)
-	for i := 0; i < num; i++ {
-		tags[i] = ext.tagString(i)
-	}
-	return tags
+	return ext.tags
 }
 
 func (ext *Extractor) tagString(index int) string {
@@ -110,34 +136,68 @@ func (ext *Extractor) tagString(index int) string {
 }
 
 // Extract runs the extractor and returns a slice of Entities found in the
-// given tokens.
+// given tokens. It is a convenience function.
 func (ext *Extractor) Extract(tokens []string) ([]Entity, error) {
-	ctokens := C.ner_arr_make(C.int(len(tokens)) + 1) // NULL termination
-	defer C.ner_arr_free(ctokens, C.int(len(tokens))+1)
+	extraction, err := ext.NewExtraction(tokens)
+	if err != nil {
+		return nil, err
+	}
+	defer extraction.Free()
+	return extraction.Entities, nil
+}
+
+// Extraction describes the result of an extract run.
+type Extraction struct {
+	Tokens    []string
+	Entities  []Entity
+	extractor *Extractor
+	ctokens   **C.char
+	dets      *C.struct_mitie_named_entity_detections
+	numDets   int
+}
+
+// NewExtraction completes an extraction task and returns the extraction results for future use in relationship extraction.
+func (ext *Extractor) NewExtraction(tokens []string) (*Extraction, error) {
+	extn := &Extraction{
+		extractor: ext,
+		Tokens:    tokens,
+	}
+	extn.ctokens = C.ner_arr_make(C.int(len(tokens)) + 1) // NULL termination
 	for i, t := range tokens {
 		cs := C.CString(t) // released by ner_arr_free
-		C.ner_arr_set(ctokens, cs, C.int(i))
+		C.ner_arr_set(extn.ctokens, cs, C.int(i))
 	}
 
-	dets := C.mitie_extract_entities(ext.ner, ctokens)
-	defer C.mitie_free(unsafe.Pointer(dets))
-	if dets == nil {
+	extn.dets = C.mitie_extract_entities(ext.ner, extn.ctokens)
+	if extn.dets == nil {
+		C.ner_arr_free(extn.ctokens, C.int(len(extn.Tokens))+1)
 		return nil, ErrMemory
 	}
 
-	n := int(C.mitie_ner_get_num_detections(dets))
-	entities := make([]Entity, n, n)
+	extn.numDets = int(C.mitie_ner_get_num_detections(extn.dets))
 
-	for i := 0; i < n; i++ {
-		pos := int(C.mitie_ner_get_detection_position(dets, C.ulong(i)))
-		len := int(C.mitie_ner_get_detection_length(dets, C.ulong(i)))
+	extn.Entities = make([]Entity, extn.numDets, extn.numDets)
 
-		entities[i] = Entity{
-			Tag:   int(C.mitie_ner_get_detection_tag(dets, C.ulong(i))),
-			Score: float64(C.mitie_ner_get_detection_score(dets, C.ulong(i))),
-			Name:  strings.Join(tokens[pos:pos+len], " "),
-			Range: Range{pos, pos + len},
+	tagNames := ext.Tags()
+	for i := 0; i < extn.numDets; i++ {
+		pos := int(C.mitie_ner_get_detection_position(extn.dets, C.ulong(i)))
+		len := int(C.mitie_ner_get_detection_length(extn.dets, C.ulong(i)))
+		tagID := int(C.mitie_ner_get_detection_tag(extn.dets, C.ulong(i)))
+
+		extn.Entities[i] = Entity{
+			Tag:       tagID,
+			TagString: tagNames[tagID],
+			Score:     float64(C.mitie_ner_get_detection_score(extn.dets, C.ulong(i))),
+			Name:      strings.Join(extn.Tokens[pos:pos+len], " "),
+			Range:     Range{pos, pos + len},
 		}
 	}
-	return entities, nil
+
+	return extn, nil
+}
+
+// Free the C mamory used by the extraction.
+func (extn *Extraction) Free() {
+	C.ner_arr_free(extn.ctokens, C.int(len(extn.Tokens))+1)
+	C.mitie_free(unsafe.Pointer(extn.dets))
 }
